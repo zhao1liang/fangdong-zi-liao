@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#4f8cff">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon.svg">
+  <title>租房管家</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div id="app">
+    <!-- 安装提示 -->
+    <div class="install-banner" id="install-banner" hidden>
+      <div class="install-banner-text">
+        <strong>📲 安装到手机桌面</strong>
+        <span id="install-hint">像 App 一样打开，不用每次找网页</span>
+      </div>
+      <div class="install-banner-actions">
+        <button type="button" class="btn primary btn-sm" id="btn-install">安装</button>
+        <button type="button" class="btn-icon btn-sm" id="btn-dismiss-install">×</button>
+      </div>
+    </div>
+
+    <header class="header">
+      <div class="header-top">
+        <button type="button" class="btn-icon drawer-toggle" id="btn-open-drawer" title="选择房源">☰</button>
+        <h1>租房管家</h1>
+        <div class="header-actions">
+          <button type="button" class="btn-icon" id="btn-calendar" title="租期日历">📅</button>
+          <button type="button" class="btn-icon" id="btn-add-property" title="添加房源">＋</button>
+        </div>
+      </div>
+      <div class="view-tabs">
+        <button type="button" class="view-tab active" data-view="album">相册</button>
+        <button type="button" class="view-tab" data-view="calendar">日历</button>
+        <button type="button" class="view-tab" data-view="import">导入</button>
+        <button type="button" class="view-tab" data-view="inbox">待处理<span class="tab-badge" id="inbox-badge" hidden>0</span></button>
+        <button type="button" class="view-tab" data-view="tasks">明日任务<span class="tab-badge" id="tasks-badge" hidden>0</span></button>
+        <button type="button" class="view-tab desktop-only" data-view="capture">屏幕采集</button>
+      </div>
+      <div class="search-bar">
+        <input type="search" id="search-input" placeholder="搜索楼盘、房号…" autocomplete="off">
+      </div>
+      <div class="alert-bar" id="lease-alerts" hidden></div>
+    </header>
+
+    <main class="main">
+      <div class="drawer-backdrop" id="drawer-backdrop"></div>
+      <aside class="sidebar property-drawer" id="property-drawer">
+        <div class="drawer-head">
+          <span>选择房源</span>
+          <button type="button" class="btn-icon" id="btn-close-drawer">×</button>
+        </div>
+        <div id="property-list"></div>
+      </aside>
+
+      <section class="content" id="content">
+        <div class="empty-state" id="empty-state">
+          <div class="empty-icon">🏠</div>
+          <p>选择左侧房源，或语音说「放入 XX花园 1201」</p>
+        </div>
+
+        <div class="calendar-view" id="calendar-view" hidden></div>
+
+        <div class="import-view panel-view" id="import-view" hidden>
+          <div class="panel-header">
+            <h2>导入微信信息</h2>
+            <p class="panel-desc">从微信复制聊天记录或出租/收费文字，批量自动归纳到房源档案</p>
+          </div>
+          <div class="import-tip">
+            <strong>怎么用：</strong>微信里多选消息 → 复制 → 粘贴到下方 → 点「开始整理」<br>
+            <span class="muted">说明：微信不允许外部 App 直接读聊天，需手动复制（见下方说明）</span>
+          </div>
+          <textarea id="import-text" class="import-textarea" rows="10" placeholder="粘贴微信聊天记录，支持多条，例如：&#10;&#10;张先生 阳光花园3栋1201&#10;2025年3月1日至2026年2月28日 月租4500&#10;&#10;502那边王女士说下周续租&#10;翠湖801水电费120"></textarea>
+          <div class="import-actions">
+            <button type="button" class="btn primary" id="btn-run-import">开始整理</button>
+            <label class="btn secondary" for="import-file">导入 txt 文件<input type="file" id="import-file" accept=".txt,text/plain" hidden></label>
+          </div>
+          <div class="import-result" id="import-result" hidden></div>
+        </div>
+
+        <div class="inbox-view panel-view" id="inbox-view" hidden>
+          <div class="panel-header">
+            <h2>待处理 <span id="inbox-count" class="count-pill">0</span></h2>
+            <p class="panel-desc">以下消息未能完全识别，请你确认或手动关联房源</p>
+          </div>
+          <ul class="inbox-list" id="inbox-list"></ul>
+        </div>
+
+        <div class="tasks-view panel-view" id="tasks-view" hidden>
+          <div class="panel-header">
+            <h2>明日任务 · <span id="tasks-date-label"></span></h2>
+            <p class="panel-desc">根据租期、收租日和未处理消息自动生成</p>
+          </div>
+          <div class="tasks-toolbar">
+            <button type="button" class="btn secondary" id="btn-refresh-tasks">刷新任务</button>
+            <button type="button" class="btn secondary" id="btn-share-tasks">分享清单</button>
+          </div>
+          <ul class="task-list" id="task-list"></ul>
+        </div>
+
+        <div class="capture-view panel-view" id="capture-view" hidden>
+          <div class="panel-header">
+            <h2>屏幕采集</h2>
+            <p class="panel-desc">录屏操作时只保留<strong>图片和文字资料</strong>，不保存视频文件</p>
+          </div>
+          <div class="import-tip">
+            <strong>怎么用：</strong>点「开始采集」→ 选择要录的屏幕/窗口（如微信聊天）→ 正常操作<br>
+            画面变化会自动截图并识别文字；也可点「立即保留」手动抓取当前画面
+          </div>
+          <div class="capture-status" id="capture-status">
+            <span class="capture-idle">未开始采集</span>
+          </div>
+          <div class="capture-controls">
+            <button type="button" class="btn primary" id="btn-start-capture">⏺ 开始采集</button>
+            <button type="button" class="btn secondary" id="btn-pin-capture" hidden>📌 立即保留</button>
+            <button type="button" class="btn secondary" id="btn-stop-capture" hidden>⏹ 结束采集</button>
+          </div>
+          <p class="capture-counter" id="capture-counter" hidden>已保留 <strong>0</strong> 条资料</p>
+
+          <div class="capture-sessions" id="capture-sessions-wrap">
+            <h3 class="section-title">采集记录</h3>
+            <div id="capture-sessions"></div>
+          </div>
+        </div>
+
+        <div class="album-view" id="album-view" hidden>
+          <div class="album-header">
+            <div>
+              <h2 id="album-title"></h2>
+              <p class="lease-info" id="lease-info"></p>
+            </div>
+            <div class="album-actions">
+              <button type="button" class="btn secondary" id="btn-edit-lease">租期</button>
+              <button type="button" class="btn secondary" id="btn-share-card">分享卡片</button>
+              <button type="button" class="btn secondary" id="btn-export">导出相册</button>
+            </div>
+          </div>
+          <div class="photo-grid" id="photo-grid"></div>
+        </div>
+      </section>
+    </main>
+
+    <!-- 语音 + 拍照 浮动栏 -->
+    <div class="voice-dock" id="voice-dock">
+      <div class="voice-preview" id="voice-preview" hidden>
+        <img id="preview-img" alt="待归档照片">
+        <button type="button" class="preview-close" id="preview-close">×</button>
+      </div>
+
+      <div class="voice-status" id="voice-status">
+        <span id="voice-hint">拍照或选图后，按住说话指定房号</span>
+      </div>
+
+      <div class="voice-controls">
+        <label class="btn camera-btn" for="photo-input">
+          📷 选图
+          <input type="file" id="photo-input" accept="image/*" capture="environment" hidden multiple>
+        </label>
+
+        <button type="button" class="btn-voice" id="btn-voice" aria-label="按住说话">
+          <span class="mic-icon">🎤</span>
+          <span class="mic-label">按住说话</span>
+        </button>
+      </div>
+
+      <p class="voice-examples">
+        试试说：<em>「放入阳光花园1201」</em> · <em>「放到3栋502客厅」</em>
+      </p>
+    </div>
+
+    <!-- 手机底部导航 -->
+    <nav class="bottom-nav" id="bottom-nav">
+      <button type="button" class="nav-item active" data-view="album">
+        <span class="nav-icon">🏠</span>
+        <span class="nav-label">相册</span>
+      </button>
+      <button type="button" class="nav-item" data-view="import">
+        <span class="nav-icon">📥</span>
+        <span class="nav-label">导入</span>
+      </button>
+      <button type="button" class="nav-item" data-view="inbox">
+        <span class="nav-icon">📋</span>
+        <span class="nav-label">待处理</span>
+        <span class="nav-badge" id="nav-inbox-badge" hidden>0</span>
+      </button>
+      <button type="button" class="nav-item" data-view="tasks">
+        <span class="nav-icon">✅</span>
+        <span class="nav-label">任务</span>
+        <span class="nav-badge" id="nav-tasks-badge" hidden>0</span>
+      </button>
+      <button type="button" class="nav-item" data-view="calendar">
+        <span class="nav-icon">📅</span>
+        <span class="nav-label">日历</span>
+      </button>
+    </nav>
+  </div>
+
+  <!-- 添加房源 -->
+  <dialog id="dialog-property">
+    <form id="form-property" method="dialog">
+      <h3 id="dialog-property-title">添加房源</h3>
+      <label>楼盘名称<input name="name" required placeholder="如：阳光花园"></label>
+      <label>楼栋/单元<input name="building" placeholder="如：3栋"></label>
+      <label>房号<input name="unit" required placeholder="如：1201"></label>
+      <div class="dialog-actions">
+        <button type="button" class="btn secondary" id="btn-cancel-property">取消</button>
+        <button type="submit" class="btn primary">保存</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- 租期 -->
+  <dialog id="dialog-lease">
+    <form id="form-lease" method="dialog">
+      <h3>租期信息</h3>
+      <label class="wechat-paste-label">
+        粘贴微信出租/收费信息
+        <textarea name="wechatPaste" id="wechat-paste" rows="3" placeholder="从微信复制租约或收款信息后粘贴，例如：&#10;张先生 阳光花园3栋1201&#10;2025年3月1日至2026年2月28日 月租4500 押金4500"></textarea>
+      </label>
+      <button type="button" class="btn secondary full-width" id="btn-parse-wechat">识别微信信息</button>
+
+      <div class="lease-divider">或手动填写</div>
+
+      <label>租客<input name="tenant" placeholder="租客姓名"></label>
+      <label>起租日<input name="startDate" type="date"></label>
+      <label>到期日<input name="endDate" type="date"></label>
+      <label>月租（元）<input name="rent" type="number" min="0" step="100"></label>
+
+      <div class="lease-options">
+        <label class="checkbox-label">
+          <input type="checkbox" name="remind" checked> 到期前 30 天弹窗提醒
+        </label>
+        <label class="checkbox-label">
+          <input type="checkbox" name="voiceRemind" checked> 提醒时语音播报
+        </label>
+        <label class="checkbox-label">
+          <input type="checkbox" name="syncCalendar" checked> 保存后标记日历
+        </label>
+      </div>
+
+      <div class="dialog-actions">
+        <button type="button" class="btn secondary" id="btn-export-ics">导出日历</button>
+        <button type="button" class="btn secondary" id="btn-cancel-lease">取消</button>
+        <button type="submit" class="btn primary">保存</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- 到期提醒弹窗 -->
+  <dialog id="dialog-reminder" class="reminder-dialog">
+    <div class="reminder-content">
+      <div class="reminder-icon">⏰</div>
+      <h3>租期到期提醒</h3>
+      <p class="reminder-sub">以下房源将在 30 天内到期，请提前联系续租或招租</p>
+      <ul class="reminder-list" id="reminder-list"></ul>
+      <div class="reminder-actions">
+        <button type="button" class="btn secondary" id="btn-reminder-share">📤 分享卡片</button>
+        <button type="button" class="btn secondary" id="btn-reminder-speak">🔊 语音播报</button>
+        <button type="button" class="btn secondary" id="btn-reminder-calendar">📅 导出日历</button>
+        <button type="button" class="btn primary" id="btn-reminder-ok">知道了</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- 处理待识别消息 -->
+  <dialog id="dialog-inbox">
+    <form id="form-inbox" method="dialog">
+      <h3>处理消息</h3>
+      <div class="inbox-raw" id="inbox-raw"></div>
+      <p class="inbox-issues" id="inbox-issues"></p>
+      <label>关联房源
+        <select name="propertyId" id="inbox-property-select"></select>
+      </label>
+      <label>或新建楼盘<input name="name" placeholder="楼盘名称"></label>
+      <label>楼栋<input name="building" placeholder="如 3栋"></label>
+      <label>房号<input name="unit" placeholder="如 1201"></label>
+      <label>租客<input name="tenant"></label>
+      <label>到期日<input name="endDate" type="date"></label>
+      <label>月租<input name="rent" type="number" min="0"></label>
+      <div class="dialog-actions">
+        <button type="button" class="btn secondary" id="btn-inbox-ignore">忽略</button>
+        <button type="button" class="btn secondary" id="btn-inbox-cancel">取消</button>
+        <button type="submit" class="btn primary">确认归档</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- 微信分享卡片 -->
+  <dialog id="dialog-share-card" class="share-card-dialog">
+    <div class="share-card-content">
+      <h3>微信分享卡片</h3>
+      <p class="share-card-sub">房号 + 到期日已生成，可直接发微信</p>
+      <div class="share-card-preview-wrap">
+        <img id="share-card-preview" alt="分享卡片预览">
+      </div>
+      <p class="share-card-hint" id="share-card-hint"></p>
+      <div class="share-card-actions">
+        <button type="button" class="btn primary" id="btn-share-wechat">📤 发送微信</button>
+        <button type="button" class="btn secondary" id="btn-share-save">💾 保存图片</button>
+        <button type="button" class="btn secondary" id="btn-share-close">关闭</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- 语音反馈 -->
+  <div class="toast" id="toast" hidden></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
