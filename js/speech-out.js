@@ -53,6 +53,29 @@ export async function speakReminders(reminders) {
   await speak(text);
 }
 
+/** 语音归档 / 新建房源后的播报（不依赖租期提醒开关） */
+export function buildArchiveSpeech(property, { created = false, photoCount = 0, tag = '' } = {}) {
+  const label = formatPropertyLabel(property);
+  if (created && photoCount > 0) {
+    const tagPart = tag ? `，标签${tag}` : '';
+    return `已新建${label}，${photoCount}张照片已放入相册${tagPart}。`;
+  }
+  if (created) {
+    return `已新建${label}，可以在相册中查看。`;
+  }
+  if (photoCount > 0) {
+    const tagPart = tag ? `，标签${tag}` : '';
+    return `${photoCount}张照片已放入${label}${tagPart}。`;
+  }
+  return `已打开${label}。`;
+}
+
+export async function speakArchiveResult(property, opts = {}) {
+  if (!('speechSynthesis' in window)) return;
+  const text = buildArchiveSpeech(property, opts);
+  await speak(text, { rate: 1.02 });
+}
+
 export function stopSpeaking() {
   if ('speechSynthesis' in window) window.speechSynthesis.cancel();
 }

@@ -1,5 +1,5 @@
 const DB_NAME = 'rental-album';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 
 let db = null;
 
@@ -105,14 +105,27 @@ export async function getPhotosByProperty(propertyId) {
   const store = tx(['photos']).objectStore('photos');
   const index = store.index('propertyId');
   const items = await promisifyRequest(index.getAll(propertyId));
-  return items.sort((a, b) => b.createdAt - a.createdAt);
+  return items.sort((a, b) => b.createdAt - a.createdAt).map(hydratePhoto);
+}
+
+function hydratePhoto(photo) {
+  if ((!photo.blob || photo.blob.size === 0) && photo.data) {
+    const buf = photo.data instanceof ArrayBuffer ? photo.data : photo.data;
+    photo.blob = new Blob([buf], { type: photo.mimeType || 'image/jpeg' });
+  }
+  return photo;
 }
 
 export async function savePhoto(photo) {
   await openDB();
   const store = tx(['photos'], 'readwrite').objectStore('photos');
-  await promisifyRequest(store.put(photo));
-  return photo;
+  const record = { ...photo };
+  if (photo.blob instanceof Blob) {
+    record.data = await photo.blob.arrayBuffer();
+    delete record.blob;
+  }
+  await promisifyRequest(store.put(record));
+  return hydratePhoto({ ...record, blob: photo.blob });
 }
 
 export async function deletePhoto(id) {

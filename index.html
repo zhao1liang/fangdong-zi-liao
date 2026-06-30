@@ -143,13 +143,18 @@
       </div>
 
       <div class="voice-status" id="voice-status">
-        <span id="voice-hint">先从相册选图，再说话或手动选房源</span>
+        <span id="voice-hint">先从相册选图，会自动弹出选房源</span>
         <span class="pending-count" id="pending-count" hidden></span>
       </div>
 
       <div class="voice-actions-row">
         <button type="button" class="btn secondary btn-sm" id="btn-pick-property" hidden>📁 手动选房源</button>
         <button type="button" class="btn secondary btn-sm" id="btn-add-more" hidden>＋ 继续添加</button>
+      </div>
+
+      <div class="quick-unit-row" id="quick-unit-row">
+        <input type="text" id="unit-quick-input" placeholder="新建或放入：锦绣小区1201" autocomplete="off">
+        <button type="button" class="btn primary btn-sm" id="btn-quick-save">执行</button>
       </div>
 
       <div class="voice-controls">
@@ -169,7 +174,8 @@
       </div>
 
       <p class="voice-examples">
-        相册/拍照 → 可旋转编辑 → <em>点按麦克风说话</em>（再点结束）
+        不选图：点🎤说「新建某某小区1201」→ 再点🎤结束，会播报并新建<br>
+        有照片：选图后说「放入某某小区1201」→ 再点🎤结束
       </p>
     </div>
 

@@ -5,7 +5,7 @@ import {
   saveCaptureSession, getAllCaptureSessions, saveCapture, getCapturesBySession,
   deleteCapture, deleteCaptureSession
 } from './db.js';
-import { parseVoiceCommand, formatPropertyLabel } from './voice.js';
+import { resolveVoiceTarget, formatPropertyLabel, isCreateCommand } from './voice.js';
 import {
   getLeaseStatus, parseWeChatText, getUndismissedReminders,
   dismissAllReminders, downloadICS, REMINDER_DAYS
@@ -13,7 +13,7 @@ import {
 import { createCalendarController } from './calendar.js';
 import {
   isVoiceReminderEnabled, setVoiceReminderEnabled,
-  speakReminders, speak, stopSpeaking
+  speakReminders, speak, stopSpeaking, speakArchiveResult
 } from './speech-out.js';
 import {
   openShareCardDialog, downloadShareCard, nativeShareCard, renderShareCard
@@ -32,6 +32,7 @@ import {
   isMobile, setupMobileUI, closePropertyDrawer, isWeChat
 } from './mobile.js';
 import { openPhotoEditor } from './photo-editor.js';
+import { normalizeToJpeg, normalizeFiles, blobToDataUrl, photoToDataUrl, ensurePhotoBlob } from './image-util.js';
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -41,6 +42,9 @@ let pendingFiles = [];
 let recognition = null;
 let isListening = false;
 let voiceTapMode = false;
+let voiceHandledThisSession = false;
+let voiceTranscript = '';
+let photoObjectUrls = [];
 let currentView = 'album';
 let pendingReminders = [];
 let calendarCtrl = null;
@@ -136,6 +140,8 @@ function setupMobile() {
 
   if (isMobile()) {
     document.body.classList.add('is-mobile');
+    const quickRow = $('#quick-unit-row');
+    if (quickRow) quickRow.hidden = false;
   }
 }
 
@@ -183,27 +189,22 @@ function initSpeech() {
 
   recognition.onstart = () => {
     isListening = true;
+    voiceTranscript = '';
+    voiceHandledThisSession = false;
     els.btnVoice.classList.add('listening');
     els.voiceStatus.classList.add('listening');
-    els.voiceHint.textContent = '正在听…请说房号';
-    if (els.micLabel) els.micLabel.textContent = '点结束';
-  };
-
-  recognition.onend = () => {
-    isListening = false;
-    els.btnVoice.classList.remove('listening');
-    els.voiceStatus.classList.remove('listening');
-    if (els.micLabel) els.micLabel.textContent = voiceTapMode ? '点按说话' : '按住说话';
     els.voiceHint.textContent = pendingFiles.length
-      ? '已选图，点麦克风说话指定房号'
-      : '先从相册选图或拍照，再语音说房号';
+      ? '正在听…如「放入锦绣小区1201」，说完点🎤结束'
+      : '正在听…如「新建锦绣小区1201」，说完点🎤结束';
+    if (els.micLabel) els.micLabel.textContent = '点结束';
   };
 
   recognition.onerror = (e) => {
     isListening = false;
     els.btnVoice.classList.remove('listening');
+    els.voiceStatus.classList.remove('listening');
     if (e.error === 'no-speech') {
-      showToast('没听到声音，请再试', 'error');
+      showToast('没听到声音，请靠近麦克风再说', 'error');
     } else if (e.error === 'not-allowed') {
       showToast('请允许麦克风权限（浏览器设置）', 'error');
     } else if (e.error !== 'aborted') {
@@ -212,21 +213,55 @@ function initSpeech() {
   };
 
   recognition.onresult = (e) => {
-    let transcript = '';
+    let interim = '';
     for (let i = e.resultIndex; i < e.results.length; i++) {
-      if (e.results[i].isFinal) transcript = e.results[i][0].transcript;
-    }
-    if (!transcript) {
-      for (let i = e.results.length - 1; i >= 0; i--) {
-        transcript = e.results[i][0].transcript;
-        break;
+      const t = e.results[i][0].transcript;
+      if (e.results[i].isFinal) {
+        voiceTranscript += t;
+      } else {
+        interim += t;
       }
     }
-    if (transcript) {
-      els.voiceHint.textContent = `听到：「${transcript}」`;
-      handleVoiceCommand(transcript);
+    const show = voiceTranscript || interim;
+    if (show) {
+      els.voiceHint.textContent = `听到：「${show}」`;
     }
   };
+
+  recognition.onend = async () => {
+    isListening = false;
+    els.btnVoice.classList.remove('listening');
+    els.voiceStatus.classList.remove('listening');
+    if (els.micLabel) els.micLabel.textContent = voiceTapMode ? '点按说话' : '按住说话';
+    updatePendingUI();
+  };
+}
+
+async function processVoiceTranscript() {
+  if (voiceHandledThisSession) return;
+
+  await new Promise((r) => setTimeout(r, 450));
+
+  if (voiceHandledThisSession) return;
+  voiceHandledThisSession = true;
+
+  const text = voiceTranscript.trim();
+  if (!text) {
+    if (pendingFiles.length) {
+      showToast('没听到内容，请再说或在下框输入「放入某某小区」', 'error');
+    } else {
+      showToast('没听到内容，可说「新建锦绣小区1201」', 'error');
+    }
+    return;
+  }
+
+  if (!pendingFiles.length && !isCreateCommand(text)) {
+    showToast('请先选图，或说「新建某某小区1201」', 'error');
+    return;
+  }
+
+  await handleVoiceCommand(text);
+  voiceTranscript = '';
 }
 
 function bindEvents() {
@@ -315,6 +350,22 @@ function bindEvents() {
 
   setupVoiceButton();
   $('#preview-close').addEventListener('click', clearPendingFiles);
+  $('#btn-pick-property').addEventListener('click', () => openPickPropertyDialog());
+  $('#btn-add-more').addEventListener('click', () => els.photoGalleryInput.click());
+  $('#btn-quick-save').addEventListener('click', () => saveByQuickUnit());
+  $('#unit-quick-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      saveByQuickUnit();
+    }
+  });
+  $('#btn-pick-cancel').addEventListener('click', () => $('#dialog-pick-property').close());
+  $('#form-pick-property').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    await savePhotosToProperty(fd.get('propertyId'), fd.get('tag') || '');
+    $('#dialog-pick-property').close();
+  });
   setupShareCardDialog();
   setupImportInboxTasks();
   setupScreenCapture();
@@ -1070,23 +1121,106 @@ function scheduleDailyCheck() {
   }, 3600000);
 }
 
-function handlePhotoPick(fileList, throughEditor) {
-  const files = [...fileList].filter((f) => f.type.startsWith('image/'));
-  if (!files.length) return;
-
-  if (throughEditor || files.length === 1) {
-    openPhotoEditor(files[0], (edited) => {
-      if (files.length > 1) {
-        setPendingFiles([...edited, ...files.slice(1)]);
-      } else {
-        setPendingFiles(edited);
-      }
-      showToast('照片已留存，点麦克风说房号', 'success');
-    });
-  } else {
-    setPendingFiles(files);
-    showToast(`已选 ${files.length} 张，点麦克风说房号`, 'success');
+function handlePhotoPick(fileList, isCamera) {
+  const raw = [...fileList].filter((f) =>
+    !f.type || f.type.startsWith('image/') || /\.(jpe?g|png|webp|heic|heif|gif|bmp)$/i.test(f.name || '')
+  );
+  if (!raw.length) {
+    showToast('未选到图片', 'error');
+    return;
   }
+
+  normalizeFiles(raw).then(async (normalized) => {
+    if (!normalized.length) {
+      showToast('图片格式不支持，请选 JPG/PNG', 'error');
+      return;
+    }
+
+    if (isCamera && normalized.length === 1) {
+      openPhotoEditor(normalized[0], (edited) => {
+        appendPendingFiles(edited);
+        showToast('照片已留存，请选房源放入相册', 'success');
+        setTimeout(() => openPickPropertyDialog(), 350);
+      });
+    } else {
+      appendPendingFiles(normalized);
+      showToast(`已添加 ${normalized.length} 张，请选房源`, 'success');
+      setTimeout(() => openPickPropertyDialog(), 350);
+    }
+  });
+}
+
+function appendPendingFiles(files) {
+  pendingFiles = [...pendingFiles, ...files];
+  updatePendingUI();
+}
+
+function updatePendingUI() {
+  const n = pendingFiles.length;
+  const countEl = $('#pending-count');
+  const pickBtn = $('#btn-pick-property');
+  const addBtn = $('#btn-add-more');
+  const quickRow = $('#quick-unit-row');
+
+  if (n > 0) {
+    els.voicePreview.hidden = false;
+    blobToDataUrl(pendingFiles[0])
+      .then((url) => { els.previewImg.src = url; })
+      .catch(() => {
+        els.previewImg.removeAttribute('src');
+        showToast('预览异常，点「手动选房源」仍可保存', 'error');
+      });
+    if (countEl) {
+      countEl.hidden = false;
+      countEl.textContent = `待归档 ${n} 张`;
+    }
+    if (pickBtn) pickBtn.hidden = false;
+    if (addBtn) addBtn.hidden = false;
+    if (quickRow && !document.body.classList.contains('is-mobile')) quickRow.hidden = false;
+    els.voiceHint.textContent = `已选 ${n} 张 → 点🎤说「放入某某小区1201」再点结束`;
+  } else {
+    clearPendingFiles();
+  }
+}
+
+function openPickPropertyDialog(candidates = null) {
+  if (!pendingFiles.length) {
+    showToast('请先选图', 'error');
+    return;
+  }
+  const list = candidates?.length ? candidates : properties;
+  const select = $('#pick-property-select');
+  select.innerHTML = list.map((p) =>
+    `<option value="${p.id}"${p.id === selectedId ? ' selected' : ''}>${escapeHtml(formatPropertyLabel(p))}</option>`
+  ).join('');
+  $('#pick-property-hint').textContent = candidates?.length
+    ? `听到多个匹配，请选一个（已选 ${pendingFiles.length} 张）`
+    : `已选 ${pendingFiles.length} 张照片，选房源后确认`;
+  $('#dialog-pick-property').showModal();
+}
+
+async function savePhotosToProperty(propertyId, tag = '') {
+  const p = properties.find((x) => x.id === propertyId);
+  if (!p || !pendingFiles.length) return;
+
+  for (const file of pendingFiles) {
+    const blob = await normalizeToJpeg(file);
+    await savePhoto({
+      id: uid(),
+      propertyId: p.id,
+      tag,
+      blob,
+      mimeType: 'image/jpeg',
+      createdAt: Date.now(),
+    });
+  }
+
+  const count = pendingFiles.length;
+  selectedId = p.id;
+  clearPendingFiles();
+  switchView('album');
+  await refreshUI();
+  showToast(`✓ ${count} 张已放入 ${formatPropertyLabel(p)}`, 'success');
 }
 
 async function ensureMicPermission() {
@@ -1106,11 +1240,7 @@ async function toggleVoiceListening() {
 
   if (isListening) {
     try { recognition.stop(); } catch { /* noop */ }
-    return;
-  }
-
-  if (!pendingFiles.length) {
-    showToast('请先相册选图或拍照', 'error');
+    processVoiceTranscript();
     return;
   }
 
@@ -1122,9 +1252,12 @@ async function toggleVoiceListening() {
   const ok = await ensureMicPermission();
   if (!ok) return;
 
+  voiceHandledThisSession = false;
+  voiceTranscript = '';
+
   try {
     recognition.start();
-  } catch (err) {
+  } catch {
     showToast('语音启动失败，请刷新后重试', 'error');
   }
 }
@@ -1155,6 +1288,7 @@ function setupVoiceButton() {
     e.preventDefault();
     if (recognition && isListening) {
       try { recognition.stop(); } catch { /* noop */ }
+      processVoiceTranscript();
     }
   };
   btn.addEventListener('mousedown', start);
@@ -1167,51 +1301,86 @@ function setupVoiceButton() {
 
 function setPendingFiles(files) {
   pendingFiles = files;
-  els.previewImg.src = URL.createObjectURL(files[0]);
-  els.voicePreview.hidden = false;
-  if (files.length > 1) {
-  els.voiceHint.textContent = '已选图，点麦克风说话指定房号';
-  }
+  updatePendingUI();
 }
 
 function clearPendingFiles() {
   pendingFiles = [];
   els.voicePreview.hidden = true;
-  els.previewImg.src = '';
-  els.voiceHint.textContent = '先从相册选图或拍照，再语音说房号';
+  els.previewImg.removeAttribute('src');
+  const countEl = $('#pending-count');
+  if (countEl) countEl.hidden = true;
+  $('#btn-pick-property').hidden = true;
+  $('#btn-add-more').hidden = true;
+  const quickRow = $('#quick-unit-row');
+  if (quickRow && !document.body.classList.contains('is-mobile')) quickRow.hidden = true;
+  const unitInput = $('#unit-quick-input');
+  if (unitInput) unitInput.value = '';
+  els.voiceHint.textContent = '先从相册选图，再选房源放入相册';
+}
+
+async function saveByQuickUnit() {
+  const cmd = $('#unit-quick-input')?.value.trim();
+  if (!cmd) {
+    showToast('请输入，如「新建锦绣小区1201」', 'error');
+    return;
+  }
+  if (!pendingFiles.length && !isCreateCommand(cmd) && !resolveVoiceTarget(cmd, properties)) {
+    showToast('请先选图，或输入「新建某某小区1201」', 'error');
+    return;
+  }
+  await handleVoiceCommand(cmd);
 }
 
 async function handleVoiceCommand(transcript) {
-  const result = parseVoiceCommand(transcript, properties);
-  if (!result) {
-    showToast('未找到匹配房源，请说「放入楼盘名+房号」', 'error');
+  showToast(`处理中：「${transcript.slice(0, 24)}」`, '');
+
+  const resolved = resolveVoiceTarget(transcript, properties);
+
+  if (!resolved) {
+    showToast('没听懂，请说「新建锦绣小区1201」或「放入锦绣小区1201」', 'error');
+    if (pendingFiles.length) openPickPropertyDialog();
     return;
   }
-  const { property, tag } = result;
+
+  if (resolved.needPick) {
+    showToast('匹配到多个房源，请选一个', 'error');
+    if (pendingFiles.length) openPickPropertyDialog(resolved.candidates);
+    return;
+  }
+
+  let property = resolved.property;
+  const wasCreated = resolved.created;
+
+  if (resolved.created) {
+    property = {
+      id: uid(),
+      name: property.name,
+      building: property.building || '',
+      unit: property.unit || '待归档',
+      lease: { tenant: '', startDate: '', endDate: '', rent: '', remind: true, voiceRemind: true },
+      createdAt: Date.now(),
+    };
+    await saveProperty(property);
+    properties = await getAllProperties();
+    renderPropertyList();
+    showToast(`已新建 ${formatPropertyLabel(property)}`, 'success');
+  }
+
   if (!pendingFiles.length) {
     selectedId = property.id;
     switchView('album');
     renderPropertyList();
     renderAlbum();
-    showToast(`已切换到 ${formatPropertyLabel(property)}`, 'success');
+    await speakArchiveResult(property, { created: wasCreated, photoCount: 0 });
     return;
   }
-  for (const file of pendingFiles) {
-    await savePhoto({
-      id: uid(),
-      propertyId: property.id,
-      tag: tag || '',
-      blob: file,
-      mimeType: file.type,
-      createdAt: Date.now(),
-    });
-  }
-  const savedCount = pendingFiles.length;
-  selectedId = property.id;
-  clearPendingFiles();
-  refreshUI();
-  const tagStr = tag ? ` · ${tag}` : '';
-  showToast(`✓ ${savedCount} 张已放入 ${formatPropertyLabel(property)}${tagStr}`, 'success');
+
+  const photoCount = pendingFiles.length;
+  const tag = resolved.tag || '';
+  await savePhotosToProperty(property.id, tag);
+  await speakArchiveResult(property, { created: wasCreated, photoCount, tag });
+  $('#unit-quick-input').value = '';
 }
 
 function openPropertyDialog() {
@@ -1342,12 +1511,21 @@ async function renderAlbum() {
 
   const photos = await getPhotosByProperty(p.id);
   if (!photos.length) {
-    els.photoGrid.innerHTML = `<div class="empty-state" style="grid-column:1/-1;min-height:160px"><p style="font-size:0.85rem">暂无照片，选图后语音说「放入${escapeHtml(p.name + p.unit)}」</p></div>`;
+    els.photoGrid.innerHTML = `<div class="empty-state" style="grid-column:1/-1;min-height:160px"><p style="font-size:0.85rem">暂无照片，从相册选图后会弹出「选房源」</p></div>`;
     return;
   }
 
-  els.photoGrid.innerHTML = photos.map((photo) => {
-    const url = URL.createObjectURL(photo.blob);
+  photoObjectUrls.forEach((u) => {
+    if (u.startsWith('blob:')) URL.revokeObjectURL(u);
+  });
+  photoObjectUrls = [];
+
+  const cards = await Promise.all(photos.map(async (photo) => {
+    let url = '';
+    try {
+      url = await photoToDataUrl(photo);
+    } catch { /* noop */ }
+    if (url.startsWith('blob:')) photoObjectUrls.push(url);
     const tagHtml = photo.tag ? `<span class="tag">${escapeHtml(photo.tag)}</span>` : '';
     return `
       <div class="photo-card" data-id="${photo.id}">
@@ -1355,7 +1533,9 @@ async function renderAlbum() {
         ${tagHtml}
         <button type="button" class="delete-btn" data-delete="${photo.id}">×</button>
       </div>`;
-  }).join('');
+  }));
+
+  els.photoGrid.innerHTML = cards.join('');
 
   els.photoGrid.querySelectorAll('[data-delete]').forEach((btn) => {
     btn.addEventListener('click', async (e) => {
@@ -1384,7 +1564,8 @@ async function exportAlbum() {
   photos.forEach((photo, i) => {
     const ext = (photo.mimeType || 'image/jpeg').split('/')[1] || 'jpg';
     const tagPart = photo.tag ? `_${photo.tag}` : '';
-    zip.file(`${String(i + 1).padStart(2, '0')}${tagPart}.${ext}`, photo.blob);
+    const blob = ensurePhotoBlob(photo);
+    zip.file(`${String(i + 1).padStart(2, '0')}${tagPart}.${ext}`, blob);
   });
   const blob = await zip.generateAsync({ type: 'blob' });
   const a = document.createElement('a');
