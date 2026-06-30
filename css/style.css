@@ -1327,6 +1327,49 @@ dialog input:focus {
   color: var(--danger);
 }
 
+.wechat-guide {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(0, 0, 0, 0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.wechat-guide-box {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 24px 20px;
+  max-width: 340px;
+  text-align: center;
+}
+
+.wechat-guide-box h3 {
+  font-size: 1.1rem;
+  margin-bottom: 12px;
+  color: var(--warning);
+}
+
+.wechat-guide-box p {
+  font-size: 0.9rem;
+  line-height: 1.7;
+  margin-bottom: 8px;
+}
+
+.wechat-guide-box .wechat-sub {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-bottom: 16px;
+}
+
+.wechat-guide-box .btn {
+  width: 100%;
+  margin-top: 8px;
+}
+
 @keyframes toast-in {
   from { opacity: 0; transform: translateX(-50%) translateY(-8px); }
   to { opacity: 1; transform: translateX(-50%) translateY(0); }

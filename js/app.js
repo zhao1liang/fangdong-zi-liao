@@ -30,7 +30,7 @@ import {
 } from './screen-capture.js';
 import {
   isMobile, isStandalone, setupInstallPrompt, promptInstall,
-  showIOSInstallHint, setupMobileUI, closePropertyDrawer
+  showIOSInstallHint, setupMobileUI, closePropertyDrawer, isWeChat, isAndroid
 } from './mobile.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -140,11 +140,18 @@ function setupMobile() {
   }
 
   $('#btn-install')?.addEventListener('click', async () => {
+    if (isWeChat()) {
+      showToast('微信里无法安装，请点右上角「在浏览器打开」', 'error');
+      return;
+    }
     const ok = await promptInstall();
     if (ok) {
       $('#install-banner').hidden = true;
     } else if (showIOSInstallHint()) {
       showInstallBanner(true);
+      showToast('Safari 点底部分享 → 添加到主屏幕', 'success');
+    } else if (isAndroid()) {
+      showToast('Chrome 点右上角 ⋮ → 添加到主屏幕', 'success');
     } else {
       showToast('请用浏览器菜单「添加到主屏幕」', 'success');
     }
