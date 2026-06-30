@@ -1,4 +1,4 @@
-const CACHE = 'rental-v1';
+const CACHE = 'rental-v3';
 const ASSETS = [
   './',
   './index.html',
@@ -15,6 +15,7 @@ const ASSETS = [
   './js/tasks.js',
   './js/screen-capture.js',
   './js/photo-editor.js',
+  './js/image-util.js',
   './icons/icon.svg',
 ];
 
