@@ -20,34 +20,6 @@ export function isStandalone() {
     || window.navigator.standalone === true;
 }
 
-let deferredPrompt = null;
-
-export function setupInstallPrompt(onReady) {
-  window.addEventListener('beforeinstallprompt', (e) => {
-    e.preventDefault();
-    deferredPrompt = e;
-    onReady?.();
-  });
-
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js').catch(() => {});
-  }
-}
-
-export async function promptInstall() {
-  if (deferredPrompt) {
-    deferredPrompt.prompt();
-    const { outcome } = await deferredPrompt.userChoice;
-    deferredPrompt = null;
-    return outcome === 'accepted';
-  }
-  return false;
-}
-
-export function showIOSInstallHint() {
-  return isIOS() && !isStandalone();
-}
-
 export function openPropertyDrawer() {
   document.getElementById('property-drawer')?.classList.add('open');
   document.getElementById('drawer-backdrop')?.classList.add('show');
@@ -70,6 +42,10 @@ export function setupMobileUI() {
       closePropertyDrawer();
     });
   });
+
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('./sw.js').catch(() => {});
+  }
 
   if (isWeChat()) {
     showWeChatGuide();

@@ -14,6 +14,7 @@ const ASSETS = [
   './js/wechat-import.js',
   './js/tasks.js',
   './js/screen-capture.js',
+  './js/photo-editor.js',
   './icons/icon.svg',
 ];
 

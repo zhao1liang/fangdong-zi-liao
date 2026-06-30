@@ -29,9 +29,9 @@ import {
   startScreenCapture, stopScreenCapture, manualCapture, isCapturing
 } from './screen-capture.js';
 import {
-  isMobile, isStandalone, setupInstallPrompt, promptInstall,
-  showIOSInstallHint, setupMobileUI, closePropertyDrawer, isWeChat, isAndroid
+  isMobile, setupMobileUI, closePropertyDrawer, isWeChat
 } from './mobile.js';
+import { openPhotoEditor } from './photo-editor.js';
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -40,6 +40,7 @@ let selectedId = null;
 let pendingFiles = [];
 let recognition = null;
 let isListening = false;
+let voiceTapMode = false;
 let currentView = 'album';
 let pendingReminders = [];
 let calendarCtrl = null;
@@ -72,7 +73,9 @@ const els = {
   voiceStatus: $('#voice-status'),
   voiceHint: $('#voice-hint'),
   btnVoice: $('#btn-voice'),
-  photoInput: $('#photo-input'),
+  micLabel: $('#mic-label'),
+  photoGalleryInput: $('#photo-gallery-input'),
+  photoCameraInput: $('#photo-camera-input'),
   toast: $('#toast'),
   dialogProperty: $('#dialog-property'),
   dialogLease: $('#dialog-lease'),
@@ -101,6 +104,8 @@ async function init() {
   await openDB();
   await seedDemoData();
   properties = await getAllProperties();
+  voiceTapMode = isMobile();
+
   calendarCtrl = createCalendarController(els.calendarView, (pid) => {
     selectedId = pid;
     switchView('album');
@@ -129,57 +134,9 @@ function setupMobile() {
     btn.addEventListener('click', () => switchView(btn.dataset.view));
   });
 
-  setupInstallPrompt(() => showInstallBanner());
-
-  if (!isStandalone() && !localStorage.getItem('install-dismissed')) {
-    if (showIOSInstallHint()) {
-      showInstallBanner(true);
-    } else if (isMobile()) {
-      setTimeout(showInstallBanner, 1500);
-    }
-  }
-
-  $('#btn-install')?.addEventListener('click', async () => {
-    if (isWeChat()) {
-      showToast('微信里无法安装，请点右上角「在浏览器打开」', 'error');
-      return;
-    }
-    const ok = await promptInstall();
-    if (ok) {
-      $('#install-banner').hidden = true;
-    } else if (showIOSInstallHint()) {
-      showInstallBanner(true);
-      showToast('Safari 点底部分享 → 添加到主屏幕', 'success');
-    } else if (isAndroid()) {
-      showToast('Chrome 点右上角 ⋮ → 添加到主屏幕', 'success');
-    } else {
-      showToast('请用浏览器菜单「添加到主屏幕」', 'success');
-    }
-  });
-
-  $('#btn-dismiss-install')?.addEventListener('click', () => {
-    $('#install-banner').hidden = true;
-    localStorage.setItem('install-dismissed', '1');
-  });
-
   if (isMobile()) {
     document.body.classList.add('is-mobile');
   }
-}
-
-function showInstallBanner(iosOnly = false) {
-  const banner = $('#install-banner');
-  const hint = $('#install-hint');
-  if (!banner || isStandalone()) return;
-
-  if (iosOnly || showIOSInstallHint()) {
-    hint.textContent = 'Safari 点分享 →「添加到主屏幕」';
-    $('#btn-install').textContent = '怎么装';
-  } else {
-    hint.textContent = '像 App 一样打开，不用每次找网页';
-    $('#btn-install').textContent = '安装';
-  }
-  banner.hidden = false;
 }
 
 async function loadInboxAndTasks(forceRegenerate = false) {
@@ -213,36 +170,45 @@ function handleShareLaunch() {
 function initSpeech() {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SpeechRecognition) {
-    els.voiceHint.textContent = '当前浏览器不支持语音识别，请用 Chrome / Edge';
+    els.voiceHint.textContent = '当前浏览器不支持语音，请用 Chrome 打开';
     els.btnVoice.disabled = true;
     return;
   }
 
   recognition = new SpeechRecognition();
   recognition.lang = 'zh-CN';
-  recognition.continuous = false;
+  recognition.continuous = true;
   recognition.interimResults = true;
-  recognition.maxAlternatives = 3;
+  recognition.maxAlternatives = 5;
 
   recognition.onstart = () => {
     isListening = true;
     els.btnVoice.classList.add('listening');
     els.voiceStatus.classList.add('listening');
-    els.voiceHint.textContent = '正在听…';
+    els.voiceHint.textContent = '正在听…请说房号';
+    if (els.micLabel) els.micLabel.textContent = '点结束';
   };
 
   recognition.onend = () => {
     isListening = false;
     els.btnVoice.classList.remove('listening');
     els.voiceStatus.classList.remove('listening');
+    if (els.micLabel) els.micLabel.textContent = voiceTapMode ? '点按说话' : '按住说话';
     els.voiceHint.textContent = pendingFiles.length
-      ? '已选图，按住说话指定房号'
-      : '拍照或选图后，按住说话指定房号';
+      ? '已选图，点麦克风说话指定房号'
+      : '先从相册选图或拍照，再语音说房号';
   };
 
   recognition.onerror = (e) => {
-    if (e.error === 'no-speech') showToast('没听到声音，请再试一次', 'error');
-    else if (e.error !== 'aborted') showToast(`语音识别失败：${e.error}`, 'error');
+    isListening = false;
+    els.btnVoice.classList.remove('listening');
+    if (e.error === 'no-speech') {
+      showToast('没听到声音，请再试', 'error');
+    } else if (e.error === 'not-allowed') {
+      showToast('请允许麦克风权限（浏览器设置）', 'error');
+    } else if (e.error !== 'aborted') {
+      showToast(`语音失败：${e.error}，请用 Chrome`, 'error');
+    }
   };
 
   recognition.onresult = (e) => {
@@ -333,10 +299,13 @@ function bindEvents() {
   });
 
   els.searchInput.addEventListener('input', () => renderPropertyList());
-  els.photoInput.addEventListener('change', (e) => {
-    const files = [...e.target.files].filter((f) => f.type.startsWith('image/'));
-    if (!files.length) return;
-    setPendingFiles(files);
+
+  els.photoGalleryInput.addEventListener('change', (e) => {
+    handlePhotoPick(e.target.files, false);
+    e.target.value = '';
+  });
+  els.photoCameraInput.addEventListener('change', (e) => {
+    handlePhotoPick(e.target.files, true);
     e.target.value = '';
   });
 
@@ -1101,15 +1070,85 @@ function scheduleDailyCheck() {
   }, 3600000);
 }
 
+function handlePhotoPick(fileList, throughEditor) {
+  const files = [...fileList].filter((f) => f.type.startsWith('image/'));
+  if (!files.length) return;
+
+  if (throughEditor || files.length === 1) {
+    openPhotoEditor(files[0], (edited) => {
+      if (files.length > 1) {
+        setPendingFiles([...edited, ...files.slice(1)]);
+      } else {
+        setPendingFiles(edited);
+      }
+      showToast('照片已留存，点麦克风说房号', 'success');
+    });
+  } else {
+    setPendingFiles(files);
+    showToast(`已选 ${files.length} 张，点麦克风说房号`, 'success');
+  }
+}
+
+async function ensureMicPermission() {
+  if (!navigator.mediaDevices?.getUserMedia) return true;
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    stream.getTracks().forEach((t) => t.stop());
+    return true;
+  } catch {
+    showToast('请在浏览器设置中允许麦克风', 'error');
+    return false;
+  }
+}
+
+async function toggleVoiceListening() {
+  if (!recognition) return;
+
+  if (isListening) {
+    try { recognition.stop(); } catch { /* noop */ }
+    return;
+  }
+
+  if (!pendingFiles.length) {
+    showToast('请先相册选图或拍照', 'error');
+    return;
+  }
+
+  if (isWeChat()) {
+    showToast('微信内语音不可用，请用 Chrome 打开', 'error');
+    return;
+  }
+
+  const ok = await ensureMicPermission();
+  if (!ok) return;
+
+  try {
+    recognition.start();
+  } catch (err) {
+    showToast('语音启动失败，请刷新后重试', 'error');
+  }
+}
+
 function setupVoiceButton() {
   const btn = els.btnVoice;
-  const start = (e) => {
+
+  if (voiceTapMode) {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      toggleVoiceListening();
+    });
+    return;
+  }
+
+  const start = async (e) => {
     e.preventDefault();
     if (!recognition || isListening) return;
     if (!pendingFiles.length) {
-      showToast('请先拍照或选择图片', 'error');
+      showToast('请先相册选图或拍照', 'error');
       return;
     }
+    const ok = await ensureMicPermission();
+    if (!ok) return;
     try { recognition.start(); } catch { /* noop */ }
   };
   const stop = (e) => {
@@ -1131,7 +1170,7 @@ function setPendingFiles(files) {
   els.previewImg.src = URL.createObjectURL(files[0]);
   els.voicePreview.hidden = false;
   if (files.length > 1) {
-    els.voiceHint.textContent = `已选 ${files.length} 张，按住说话指定房号`;
+  els.voiceHint.textContent = '已选图，点麦克风说话指定房号';
   }
 }
 
@@ -1139,7 +1178,7 @@ function clearPendingFiles() {
   pendingFiles = [];
   els.voicePreview.hidden = true;
   els.previewImg.src = '';
-  els.voiceHint.textContent = '拍照或选图后，按住说话指定房号';
+  els.voiceHint.textContent = '先从相册选图或拍照，再语音说房号';
 }
 
 async function handleVoiceCommand(transcript) {

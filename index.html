@@ -15,18 +15,6 @@
 </head>
 <body>
   <div id="app">
-    <!-- 安装提示 -->
-    <div class="install-banner" id="install-banner" hidden>
-      <div class="install-banner-text">
-        <strong>📲 安装到手机桌面</strong>
-        <span id="install-hint">像 App 一样打开，不用每次找网页</span>
-      </div>
-      <div class="install-banner-actions">
-        <button type="button" class="btn primary btn-sm" id="btn-install">安装</button>
-        <button type="button" class="btn-icon btn-sm" id="btn-dismiss-install">×</button>
-      </div>
-    </div>
-
     <header class="header">
       <div class="header-top">
         <button type="button" class="btn-icon drawer-toggle" id="btn-open-drawer" title="选择房源">☰</button>
@@ -159,19 +147,23 @@
       </div>
 
       <div class="voice-controls">
-        <label class="btn camera-btn" for="photo-input">
-          📷 选图
-          <input type="file" id="photo-input" accept="image/*" capture="environment" hidden multiple>
+        <label class="btn camera-btn" for="photo-gallery-input">
+          🖼 相册
+          <input type="file" id="photo-gallery-input" accept="image/*" hidden multiple>
+        </label>
+        <label class="btn camera-btn" for="photo-camera-input">
+          📷 拍照
+          <input type="file" id="photo-camera-input" accept="image/*" capture="environment" hidden>
         </label>
 
-        <button type="button" class="btn-voice" id="btn-voice" aria-label="按住说话">
+        <button type="button" class="btn-voice" id="btn-voice" aria-label="语音">
           <span class="mic-icon">🎤</span>
-          <span class="mic-label">按住说话</span>
+          <span class="mic-label" id="mic-label">点按说话</span>
         </button>
       </div>
 
       <p class="voice-examples">
-        试试说：<em>「放入阳光花园1201」</em> · <em>「放到3栋502客厅」</em>
+        相册/拍照 → 可旋转编辑 → <em>点按麦克风说话</em>（再点结束）
       </p>
     </div>
 
@@ -201,6 +193,21 @@
       </button>
     </nav>
   </div>
+
+  <!-- 照片编辑 -->
+  <dialog id="dialog-photo-edit" class="photo-edit-dialog">
+    <div class="photo-edit-content">
+      <h3>编辑照片</h3>
+      <div class="photo-edit-frame">
+        <img id="edit-preview" alt="编辑预览">
+      </div>
+      <div class="photo-edit-actions">
+        <button type="button" class="btn secondary" id="btn-edit-rotate">↻ 旋转</button>
+        <button type="button" class="btn secondary" id="btn-edit-retake">重选</button>
+        <button type="button" class="btn primary" id="btn-edit-confirm">使用此图</button>
+      </div>
+    </div>
+  </dialog>
 
   <!-- 添加房源 -->
   <dialog id="dialog-property">
